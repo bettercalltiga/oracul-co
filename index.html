@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Oracul</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#300a24; }
+  canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─────────────────────────────────────────────────────────────────
+// Ubuntu terminal palette
+// background: #300a24  (Ubuntu dark purple)
+// text dim:   #7a5c6e
+// text mid:   #cc8fa0
+// text norm:  #e8d4dc
+// text bright:#ffffff
+// yellow:     #f5c518  (minion)
+// green:      #4caf50
+// cyan:       #06b6d4
+// orange:     #e67e22
+// indigo:     #818cf8
+// ─────────────────────────────────────────────────────────────────
+
+const CV  = document.getElementById('c');
+const ctx = CV.getContext('2d');
+
+// font metrics
+const FONT_FACE = '"Ubuntu Mono", "Courier New", monospace';
+let CW, CH, COLS, ROWS, FS; // char w/h, grid size, font size
+
+function resize() {
+  CV.width  = window.innerWidth;
+  CV.height = window.innerHeight;
+  FS   = Math.max(11, Math.min(16, Math.floor(CV.width / 115)));
+  ctx.font = `${FS}px ${FONT_FACE}`;
+  CW = Math.floor(ctx.measureText('M').width);
+  CH = Math.floor(FS * 1.22);
+  COLS = Math.floor(CV.width  / CW);
+  ROWS = Math.floor(CV.height / CH);
+}
+resize();
+window.addEventListener('resize', () => { resize(); buildScene(); });
+
+// ─── colour palette ───────────────────────────────────
+const BG       = '#300a24';
+const C_DIM    = '#5a3a4a';
+const C_MID    = '#9b6e7e';
+const C_NORM   = '#e8d4dc';
+const C_BRIGHT = '#ffffff';
+const C_YELLOW = '#f5d020';
+const C_LBLUE  = '#87ceeb';
+const C_GREEN  = '#4caf50';
+const C_CYAN   = '#06b6d4';
+const C_ORANGE = '#e67e22';
+const C_RED    = '#e74c3c';
+const C_PURPLE = '#9b59b6';
+const C_INDIGO = '#818cf8';
+const C_GOLD   = '#f59e0b';
+
+// ─── CELL BUFFER ──────────────────────────────────────
+// Each cell: { ch, fg, bg? }
+let buf = [];
+
+function clearBuf() {
+  buf = Array.from({ length: ROWS }, () =>
+    Array.from({ length: COLS }, () => ({ ch: ' ', fg: C_DIM }))
+  );
+}
+
+function put(row, col, ch, fg) {
+  if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return;
+  buf[row][col] = { ch, fg };
+}
+
+function puts(row, col, str, fg) {
+  for (let i = 0; i < str.length; i++) put(row, col + i, str[i], fg);
+}
+
+// ─── ORACUL STRUCTURE (centred, sized to grid) ────────
+// returns { topRow, botRow, leftCol, rightCol }
+let structBounds = {};
+
+function drawOracul() {
+  const h = Math.min(22, Math.floor(ROWS * 0.52));
+  const w = Math.min(44, Math.floor(COLS * 0.38));
+  const r0 = Math.floor(ROWS * 0.12);
+  const c0 = Math.floor((COLS - w) / 2);
+
+  structBounds = { top: r0, bot: r0+h, left: c0, right: c0+w };
+
+  // top beam
+  puts(r0,   c0,   '╔' + '═'.repeat(w-2) + '╗', C_BRIGHT);
+  puts(r0+1, c0,   '║' + ' '.repeat(w-2) + '║', C_NORM);
+
+  // ORACUL title centred on row r0+1
+  const title = '  O R A C U L  ';
+  const tc = c0 + Math.floor((w - title.length) / 2);
+  puts(r0+1, tc, title, C_BRIGHT);
+
+  // second beam
+  puts(r0+2, c0, '╠' + '═'.repeat(w-2) + '╣', C_BRIGHT);
+
+  // orb section — rows r0+3 .. r0+3+orbH
+  const orbH = Math.max(9, Math.floor(h * 0.52));
+  const orbW = w - 2;
+  const orbC = c0 + 1;
+
+  for (let i = 0; i < orbH; i++) {
+    put(r0+3+i, c0,     '║', C_BRIGHT);
+    put(r0+3+i, c0+w-1, '║', C_BRIGHT);
+    // fill inside with dim
+    for (let j = 1; j < w-1; j++) put(r0+3+i, c0+j, '·', C_DIM);
+  }
+
+  // eye / orb (animated via pulse - predrawn static base, pulse in render)
+  const ec = Math.floor(COLS / 2);
+  const er = r0 + 3 + Math.floor(orbH / 2);
+
+  const eye = [
+    '      .+*+.      ',
+    '    +#######+    ',
+    '   ##  ___  ##   ',
+    '  ##  /   \\  ##  ',
+    '  ## | (●) | ##  ',
+    '  ##  \\___/  ##  ',
+    '   ##       ##   ',
+    '    +#######+    ',
+    '      .+*+.      ',
+  ];
+  eye.forEach((line, i) => {
+    const row = er - 4 + i;
+    const col = ec - Math.floor(line.length / 2);
+    for (let j = 0; j < line.length; j++) {
+      const ch = line[j];
+      let fg = C_DIM;
+      if (ch === '#') fg = C_INDIGO;
+      else if (ch === '●') fg = C_BRIGHT;
+      else if (ch === '(' || ch === ')') fg = C_LBLUE;
+      else if (ch === '/' || ch === '\\' || ch === '_') fg = C_LBLUE;
+      else if (ch === '+') fg = C_INDIGO;
+      else if (ch === '*') fg = C_BRIGHT;
+      else if (ch === '.') fg = C_MID;
+      if (ch !== ' ') put(row, col+j, ch, fg);
+    }
+  });
+
+  // frame around orb
+  const fbr = er - 5, fbc = ec - 10;
+  const fbh = 11, fbw = 20;
+  puts(fbr,       fbc, '┌' + '─'.repeat(fbw-2) + '┐', C_MID);
+  puts(fbr+fbh-1, fbc, '└' + '─'.repeat(fbw-2) + '┘', C_MID);
+  for (let i=1; i<fbh-1; i++) {
+    put(fbr+i, fbc,       '│', C_MID);
+    put(fbr+i, fbc+fbw-1, '│', C_MID);
+  }
+
+  // bottom section
+  const botStart = r0+3+orbH;
+  puts(botStart, c0, '╠' + '═'.repeat(w-2) + '╣', C_BRIGHT);
+  for (let i=1; i<=3; i++) {
+    put(botStart+i, c0,     '║', C_BRIGHT);
+    put(botStart+i, c0+w-1, '║', C_BRIGHT);
+  }
+  puts(botStart+4, c0, '╚' + '═'.repeat(w-2) + '╝', C_BRIGHT);
+
+  // scaffolding left
+  const scL = c0 - 5;
+  for (let i=0; i<h+2; i++) {
+    put(r0+i, scL, '│', C_DIM);
+    if (i % 4 === 0) {
+      puts(r0+i, scL-2, '─┤', C_DIM);
+    }
+  }
+  // scaffolding right
+  const scR = c0+w+4;
+  for (let i=0; i<h+2; i++) {
+    put(r0+i, scR, '│', C_DIM);
+    if (i % 4 === 0) {
+      puts(r0+i, scR, '├─', C_DIM);
+    }
+  }
+
+  // ground line below structure
+  const gr = r0+h+2;
+  for (let j = 0; j < COLS; j++) {
+    put(gr, j, j % 4 === 0 ? '┄' : '─', C_DIM);
+  }
+  structBounds.ground = gr;
+
+  // stacked blocks
+  const blocks = [
+    [gr-1, c0-12], [gr-2, c0-11], [gr-1, c0-9],
+    [gr-1, c0+w+7], [gr-2, c0+w+6], [gr-1, c0+w+9],
+  ];
+  blocks.forEach(([r,c]) => puts(r, c, '[▓▓]', C_MID));
+}
+
+// ─── MINION SPRITES ────────────────────────────────────
+// Each sprite is array of [string, fgColor][]
+// Two frames for animation
+
+const M_WALK = [
+  [' o ', C_YELLOW],
+  ['[█]', null],     // null = overall colour
+  ['/█\\', null],
+  [' | ', C_YELLOW],
+  ['/ \\', C_DIM],
+];
+const M_WALK2 = [
+  [' o ', C_YELLOW],
+  ['[█]', null],
+  ['\\█/', null],
+  [' | ', C_YELLOW],
+  ['\\ /', C_DIM],
+];
+const M_HAMMER = [
+  ['⚒ o ', C_GOLD],
+  [' [█]', null],
+  [' /█\\', null],
+  ['  | ', C_YELLOW],
+  [' / \\', C_DIM],
+];
+const M_HAMMER2 = [
+  [' o ⚒', C_GOLD],
+  ['[█] ', null],
+  ['/█\\ ', null],
+  [' |  ', C_YELLOW],
+  ['/ \\ ', C_DIM],
+];
+const M_CARRY = [
+  ['[▓▓▓]', C_MID],
+  ['  o  ', C_YELLOW],
+  [' [█] ', null],
+  ['  |  ', C_YELLOW],
+  [' / \\', C_DIM],
+];
+const M_LOOKUP = [
+  ['\\o/', C_YELLOW],
+  ['[█]', null],
+  ['/█\\', null],
+  [' | ', C_YELLOW],
+  ['/ \\', C_DIM],
+];
+const M_WRENCH = [
+  [' o🔧', C_YELLOW],
+  ['[█] ', null],
+  ['/█\\ ', null],
+  [' |  ', C_YELLOW],
+  ['/ \\ ', C_DIM],
+];
+
+const OVERALLS = [C_CYAN, C_GREEN, C_RED, C_PURPLE, C_ORANGE, C_CYAN, C_GREEN, C_PURPLE];
+const SPRITES_A = [M_WALK,  M_HAMMER,  M_CARRY, M_LOOKUP, M_WRENCH, M_WALK,  M_CARRY,  M_HAMMER];
+const SPRITES_B = [M_WALK2, M_HAMMER2, M_CARRY, M_LOOKUP, M_WRENCH, M_WALK2, M_CARRY,  M_HAMMER2];
+
+function drawSpriteAt(row, col, sprite, overall, flip) {
+  sprite.forEach((line, i) => {
+    const [str, fg] = line;
+    const color = fg === null ? overall : fg;
+    const s = flip ? str.split('').reverse().join('') : str;
+    puts(row + i, col, s, color);
+  });
+}
+
+// ─── MINION CLASS ──────────────────────────────────────
+class Minion {
+  constructor(id) {
+    this.id       = id;
+    this.overall  = OVERALLS[id % OVERALLS.length];
+    this.sprA     = SPRITES_A[id % SPRITES_A.length];
+    this.sprB     = SPRITES_B[id % SPRITES_B.length];
+    this.flip     = Math.random() > 0.5;
+    this.arrived  = false;
+    this.idleTick = 0;
+    this.frame    = 0;
+    this.frameTick= 0;
+    this.frameRate= 6 + Math.floor(Math.random() * 8); // ticks per frame flip
+    this._spawn();
+  }
+
+  _spawn() {
+    const e = Math.floor(Math.random() * 4);
+    if (e === 0) { this.row = Math.floor(ROWS*0.3 + Math.random()*ROWS*0.55); this.col = -6; }
+    else if (e === 1) { this.row = Math.floor(ROWS*0.3 + Math.random()*ROWS*0.55); this.col = COLS+6; }
+    else if (e === 2) { this.row = ROWS+3; this.col = Math.floor(Math.random()*COLS); }
+    else  { this.row = -6; this.col = Math.floor(Math.random()*COLS); }
+    this._pickTarget();
+    this.arrived = false;
+  }
+
+  _pickTarget() {
+    // cluster tightly around the structure, some further away
+    const { left, right, top, bot, ground } = structBounds;
+    const zone = Math.random();
+    if (zone < 0.35) {
+      // close to structure edges (building)
+      this.tr = top + Math.floor(Math.random() * (bot - top));
+      this.tc = (Math.random() > 0.5)
+        ? left  - 2 - Math.floor(Math.random() * 8)
+        : right + 2 + Math.floor(Math.random() * 8);
+    } else if (zone < 0.65) {
+      // on scaffolds
+      this.tr = top + Math.floor(Math.random() * (bot - top - 2));
+      this.tc = (Math.random() > 0.5)
+        ? left  - 7 - Math.floor(Math.random() * 4)
+        : right + 7 + Math.floor(Math.random() * 4);
+    } else {
+      // wandering below structure
+      this.tr = (ground || Math.floor(ROWS*0.75)) - 1 - Math.floor(Math.random() * 8);
+      this.tc = Math.floor(COLS * 0.1 + Math.random() * COLS * 0.8);
+    }
+    this.tr = Math.max(1, Math.min(ROWS - 7, this.tr));
+    this.tc = Math.max(1, Math.min(COLS - 7, this.tc));
+  }
+
+  update(tick) {
+    // animation frame
+    this.frameTick++;
+    if (this.frameTick >= this.frameRate) {
+      this.frame = 1 - this.frame;
+      this.frameTick = 0;
+    }
+
+    if (!this.arrived) {
+      const dr = this.tr - this.row;
+      const dc = this.tc - this.col;
+      const dist = Math.sqrt(dr*dr + dc*dc);
+      if (dist < 2) {
+        this.arrived  = true;
+        this.idleTick = 40 + Math.floor(Math.random() * 120);
+      } else {
+        // move 1 step per N ticks depending on distance
+        const moveTick = dist > 20 ? 2 : dist > 8 ? 3 : 5;
+        if (tick % moveTick === (this.id % moveTick)) {
+          const sr = dr === 0 ? 0 : dr / Math.abs(dr);
+          const sc2 = dc === 0 ? 0 : dc / Math.abs(dc);
+          this.row += sr;
+          this.col += sc2;
+          if (dc !== 0) this.flip = dc < 0;
+        }
+      }
+    } else {
+      // small wiggle
+      if (tick % 18 === this.id % 18) {
+        this.col += Math.random() > 0.5 ? 1 : -1;
+        this.col = Math.max(1, Math.min(COLS-7, this.col));
+      }
+      this.idleTick--;
+      if (this.idleTick <= 0) {
+        this._pickTarget();
+        this.arrived = false;
+      }
+    }
+  }
+
+  draw() {
+    const spr = this.frame === 0 ? this.sprA : this.sprB;
+    drawSpriteAt(this.row, this.col, spr, this.overall, this.flip);
+  }
+}
+
+// ─── SCANLINE / CRT NOISE ─────────────────────────────
+const NOISE_CHARS = ['░', '▒', '·', ' ', ' ', ' ', ' ', ' '];
+
+function drawNoise(tick) {
+  // sparse flickering noise in background
+  const count = Math.floor(COLS * ROWS * 0.004);
+  for (let i = 0; i < count; i++) {
+    const r = Math.floor(Math.random() * ROWS);
+    const c = Math.floor(Math.random() * COLS);
+    if (buf[r][c].ch === ' ') {
+      put(r, c, NOISE_CHARS[Math.floor(Math.random()*NOISE_CHARS.length)], C_DIM);
+    }
+  }
+
+  // scrolling scan line hint
+  const sl = (tick * 0.4) % ROWS;
+  for (let c = 0; c < COLS; c++) {
+    if (buf[Math.floor(sl)][c].ch === ' ') {
+      put(Math.floor(sl), c, ' ', C_DIM);
+    }
+  }
+}
+
+// ─── PROMPT LINE ──────────────────────────────────────
+function drawPrompt(tick) {
+  const r = ROWS - 2;
+  const blink = Math.floor(tick / 30) % 2 === 0 ? '█' : ' ';
+  puts(r, 1, `user@oracul:~$ ${blink}`, C_GREEN);
+}
+
+// ─── RENDER BUFFER → CANVAS ───────────────────────────
+function renderBuf() {
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, CV.width, CV.height);
+  ctx.font = `${FS}px ${FONT_FACE}`;
+  ctx.textBaseline = 'top';
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = buf[r][c];
+      if (cell.ch === ' ') continue;
+      ctx.fillStyle = cell.fg;
+      ctx.fillText(cell.ch, c * CW, r * CH);
+    }
+  }
+}
+
+// ─── PULSE ORB (overlay blink) ────────────────────────
+function pulseOrb(tick) {
+  const { top } = structBounds;
+  if (!top) return;
+  const ec = Math.floor(COLS / 2);
+  const er = top + 3 + Math.floor(ROWS * 0.14);
+  const t = tick * 0.04;
+  const bright = Math.sin(t) > 0.6;
+  if (bright) {
+    put(er, ec,   '●', C_BRIGHT);
+    put(er, ec-1, '(', C_LBLUE);
+    put(er, ec+1, ')', C_LBLUE);
+  }
+}
+
+// ─── SCENE SETUP ──────────────────────────────────────
+let minions = [];
+function buildScene() {
+  const N = Math.min(40, Math.max(18, Math.floor((COLS * ROWS) / 320)));
+  minions = Array.from({ length: N }, (_, i) => new Minion(i));
+  // pre-scatter around structure
+  if (structBounds.left) {
+    minions.forEach((m, i) => {
+      const a = (i / N) * Math.PI * 2;
+      const r = 6 + Math.floor(Math.random() * 10);
+      m.col = Math.floor(COLS/2 + Math.cos(a) * (COLS*0.28));
+      m.row = Math.floor(ROWS*0.55 + Math.sin(a) * (ROWS*0.22));
+      m.col = Math.max(1, Math.min(COLS-7, m.col));
+      m.row = Math.max(1, Math.min(ROWS-7, m.row));
+    });
+  }
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────
+let tick = 0;
+function loop() {
+  requestAnimationFrame(loop);
+  tick++;
+
+  clearBuf();
+  drawOracul();
+
+  minions.forEach(m => { m.update(tick); m.draw(); });
+
+  pulseOrb(tick);
+  drawNoise(tick);
+  drawPrompt(tick);
+  renderBuf();
+}
+
+// init
+clearBuf();
+drawOracul();   // need structBounds before building minions
+buildScene();
+loop();
+</script>
+</body>
+</html>
